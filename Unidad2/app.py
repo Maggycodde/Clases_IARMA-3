@@ -14,7 +14,6 @@ except ImportError:
 
 st.set_page_config(
     page_title="SoundLens · Análisis musical",
-    page_icon="🎧",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -24,7 +23,7 @@ SUPERFICIE = "#151A22"
 BORDE = "#262D3A"
 TEXTO = "#E6EAF0"
 TEXTO_SUAVE = "#9AA4B2"
-MENTA = "#2DD4A7"    
+MENTA = "#2DD4A7"   
 AMBAR = "#F5B83D"    
 LILA = "#C084FC"     
 ARENA = "#E7D8B8"
@@ -44,8 +43,8 @@ pio.templates["soundlens"] = go.layout.Template(
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color=TEXTO, family="Inter, Segoe UI, sans-serif"),
         colorway=SECUENCIA,
-        xaxis=dict(gridcolor=BORDE, zerolinecolor=BORDE, linecolor=BORDE),
-        yaxis=dict(gridcolor=BORDE, zerolinecolor=BORDE, linecolor=BORDE),
+        xaxis=dict(gridcolor=BORDE, zerolinecolor=BORDE, linecolor=BORDE, automargin=True),
+        yaxis=dict(gridcolor=BORDE, zerolinecolor=BORDE, linecolor=BORDE, automargin=True),
         title=dict(font=dict(size=16, color=TEXTO), x=0, xanchor="left"),
         margin=dict(l=10, r=10, t=50, b=10),
         legend=dict(bgcolor="rgba(0,0,0,0)"),
@@ -104,15 +103,21 @@ def mostrar(fig, altura=None):
         fig.update_layout(height=altura)
     try:
         st.plotly_chart(fig, width="stretch", theme=None)
-    except TypeError:  # versiones antiguas de Streamlit
+    except TypeError: 
         st.plotly_chart(fig, use_container_width=True, theme=None)
 
-def mostrar_tabla(df, altura=None):
-    opciones = {"height": altura} if altura else {}
+
+def mostrar_tabla(df, altura=None, ocultar_indice=False):
+    opciones = {}
+    if altura:
+        opciones["height"] = altura
+    if ocultar_indice:
+        opciones["hide_index"] = True
     try:
         st.dataframe(df, width="stretch", **opciones)
     except TypeError:
         st.dataframe(df, use_container_width=True, **opciones)
+
 
 def formato_duracion(segundos):
     segundos = int(round(segundos))
@@ -303,27 +308,60 @@ def pagina_tiempo(f, df):
                "Evolución de la producción y la popularidad a lo largo de los años.")
 
     por_anio = (f.groupby("Year")
-                .agg(Canciones=("Title", "count"), Popularidad=("Popularity", "mean"))
-                .reset_index())
+                .agg(Canciones=("Title", "count"),
+                     Popularidad=("Popularity", "mean"),
+                     Duracion=("Duration", "mean"))
+                .round(2).reset_index())
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        fig = px.line(por_anio, x="Year", y="Canciones", markers=True,
-                      color_discrete_sequence=[MENTA],
-                      title="Canciones por año de lanzamiento",
-                      labels={"Year": "Año"})
-        mostrar(fig, 340)
-    with col_b:
-        fig = px.line(por_anio, x="Year", y="Popularidad", markers=True,
-                      range_y=[0, 100], color_discrete_sequence=[AMBAR],
-                      title="Popularidad media por año",
-                      labels={"Year": "Año", "Popularidad": "Popularidad media"})
-        mostrar(fig, 340)
+    fig = px.line(por_anio, x="Year", y="Canciones", markers=True, text="Canciones",
+                  color_discrete_sequence=[MENTA],
+                  title="Canciones por año de lanzamiento",
+                  labels={"Year": "Año"})
+    fig.update_traces(mode="lines+markers+text", texttemplate="%{text:,}",
+                      textposition="top center", textfont=dict(size=12, color=TEXTO),
+                      cliponaxis=False)
+    fig.update_xaxes(dtick=1, tickformat="d")
+    fig.update_yaxes(range=[0, por_anio["Canciones"].max() * 1.25])
+    mostrar(fig, 420)
 
+    fig = px.line(por_anio, x="Year", y="Popularidad", markers=True, text="Popularidad",
+                  color_discrete_sequence=[AMBAR],
+                  title="Popularidad media por año",
+                  labels={"Year": "Año", "Popularidad": "Popularidad media"})
+    fig.update_traces(mode="lines+markers+text", texttemplate="%{text:.1f}",
+                      textposition="top center", textfont=dict(size=12, color=TEXTO),
+                      cliponaxis=False)
+    fig.update_xaxes(dtick=1, tickformat="d")
+    fig.update_yaxes(range=[0, 100])
+    mostrar(fig, 420)
+
+    st.subheader("Detalle por año")
+    tabla_anio = pd.DataFrame({
+        "Año": por_anio["Year"].astype(str),
+        "Canciones": por_anio["Canciones"],
+        "Popularidad media": por_anio["Popularidad"].round(2),
+        "Duración media": [formato_duracion(x) for x in por_anio["Duracion"]],
+    })
+    mostrar_tabla(tabla_anio, altura=36 * (len(tabla_anio) + 1) + 3, ocultar_indice=True)
+
+    st.subheader("Correlación entre variables")
     corr = f[["Duration", "Popularity", "Year"]].corr().round(2)
-    fig = px.imshow(corr, text_auto=True, color_continuous_scale=ESCALA_DIVERGENTE,
-                    zmin=-1, zmax=1, title="Correlación entre variables numéricas")
-    mostrar(fig, 380)
+    nombres = ["Duración", "Popularidad", "Año"]
+    corr.columns = nombres
+    corr.index = nombres
+
+    col_a, col_b = st.columns([3, 2])
+    with col_a:
+        fig = px.imshow(corr, text_auto=".2f", color_continuous_scale=ESCALA_DIVERGENTE,
+                        zmin=-1, zmax=1, title="Mapa de calor de correlación")
+        fig.update_traces(textfont_size=18)
+        mostrar(fig, 420)
+    with col_b:
+        st.write("")
+        st.write("")
+        mostrar_tabla(corr.reset_index().rename(columns={"index": "Variable"}),
+                      altura=3 * 36 + 3 + 36, ocultar_indice=True)
+        st.caption("Valores cercanos a 0 indican que no hay relación lineal entre las variables.")
 
     st.subheader("Espectro de potencia de la duración")
     if HAY_SCIPY and len(f) > 10:
@@ -333,7 +371,7 @@ def pagina_tiempo(f, df):
                       color_discrete_sequence=[LILA],
                       title="Periodograma de la duración (canciones ordenadas por fecha)",
                       labels={"x": "Frecuencia", "y": "Potencia"})
-        mostrar(fig, 380)
+        mostrar(fig, 420)
         st.caption("Sin picos marcados: no hay ciclos periódicos en la duración, "
                    "lo que coincide con el comportamiento casi aleatorio del resto de los datos.")
     else:
@@ -405,7 +443,7 @@ PAGINAS = {
     "Géneros": pagina_generos,
     "Tendencia temporal": pagina_tiempo,
     "Explorador de datos": pagina_datos,
-    "ℹAcerca de": pagina_acerca,
+    "Acerca de": pagina_acerca,
 }
 
 
@@ -428,7 +466,7 @@ def barra_lateral(df):
             st.session_state[clave] = valor
 
     with st.sidebar:
-        st.markdown('<div class="marca">Sound<span>Lens</span> 🎧</div>',
+        st.markdown('<div class="marca">Sound<span>Lens</span></div>',
                     unsafe_allow_html=True)
         st.markdown('<div class="sub-marca">Panel de análisis musical 2000-2020</div>',
                     unsafe_allow_html=True)
